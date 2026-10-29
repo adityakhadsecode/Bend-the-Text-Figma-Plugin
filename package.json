@@ -1,0 +1,26 @@
+{
+  "name": "bend-the-text",
+  "version": "1.0.0",
+  "description": "Bend the Text — A Figma plugin for curving and bending typography along custom arches and full 360-degree circles.",
+  "main": "code.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -w -p tsconfig.json"
+  },
+  "keywords": [
+    "figma",
+    "figma-plugin",
+    "typography",
+    "text-on-a-path",
+    "bend-the-text",
+    "curve-text",
+    "bend-text",
+    "circular-text"
+  ],
+  "author": "Antigravity Pair Programmer",
+  "license": "MIT",
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.100.0",
+    "typescript": "^5.4.5"
+  }
+}
