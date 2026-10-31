@@ -4,7 +4,7 @@
 
 ---
 
-## ⚡ Quick Start: Load into Figma in 30 Seconds (Zero-Build)
+## Quick Start: Load into Figma in 30 Seconds (Zero-Build)
 
 You do **not** need to install npm packages or run a build step to use this plugin immediately. It is packaged with pre-compiled, standalone production code ready for Figma.
 
@@ -26,9 +26,10 @@ You do **not** need to install npm packages or run a build step to use this plug
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 * **Dynamic Curvature Control:** Bend linear text upwards into a rainbow/arch dome, downwards into a smile/bowl curve, or wrap it completely into a 360° circular badge.
+* **Non-Destructive Live Re-editing:** Select any previously generated curved group or vector outline to automatically restore its exact bend strength, tracking, placement, and alignment sliders. Live-preview adjustments directly in place and click **Update Bend** to commit changes without canvas clutter.
 * **Side-by-Side Non-Destructive Workflow:** Places the newly created curved group directly **beside** your selected textbox (or below/in-place if selected), keeping your original text layer 100% visible and untouched.
 * **100% Font & Style Inheritance:** Clones every typographic and visual property:
   * Exact font family, weight, and styles (including mixed fonts per character).
@@ -48,7 +49,7 @@ You do **not** need to install npm packages or run a build step to use this plug
 
 ---
 
-## 📐 Mathematical Formulation
+## Mathematical Formulation
 
 ### 1. Arc Angle & Circle Radius
 Given:
@@ -86,7 +87,7 @@ $$\mathbf{M} = \begin{bmatrix} \cos \phi & -\sin \phi & t_x \\ \sin \phi & \cos 
 
 ---
 
-## 🛠️ Project Structure
+## Project Structure
 
 ```
 ├── manifest.json       # Figma plugin manifest descriptor
@@ -102,7 +103,7 @@ $$\mathbf{M} = \begin{bmatrix} \cos \phi & -\sin \phi & t_x \\ \sin \phi & \cos 
 
 ---
 
-## 💻 Development & Building from TypeScript
+## Development & Building from TypeScript
 
 ```bash
 # Install dependencies
@@ -117,6 +118,6 @@ npm run watch
 
 ---
 
-## 📄 License
+## License
 
 MIT License. Free to use and customize for personal and commercial projects.

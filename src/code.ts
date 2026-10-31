@@ -3,7 +3,7 @@
 
 figma.showUI(__html__, {
   width: 360,
-  height: 620,
+  height: 600,
   themeColors: true,
   title: "Bend the Text"
 });
@@ -12,30 +12,161 @@ figma.showUI(__html__, {
 figma.loadFontAsync({ family: "Inter", style: "Regular" }).catch(() => {});
 
 let currentPreviewGroup: (GroupNode | SceneNode) | null = null;
+let currentPreviewSession = 0;
 let lastSelectedNodeId: string | null = null;
 let lastSelectedTextNodeId: string | null = null;
+
+let activeReEditNode: SceneNode | null = null;
+let activeReEditConfig: BendConfig | null = null;
 
 interface TextSelectionInfo {
   textNode: TextNode;
   referenceNode: SceneNode;
 }
 
-// Helper: Find selected TextNode or enclosing Group/Frame containing text
+interface BendOptions {
+  bend: number;
+  tracking: number;
+  alignment: "baseline" | "center" | "top" | "bottom";
+  placement: "beside" | "below" | "inplace";
+  invert: boolean;
+  outputFormat: "text" | "vector";
+}
+
+interface CharMetric {
+  char: string;
+  width: number;
+  height: number;
+  font: FontName;
+  size: number;
+  fills: any;
+  letterSpacing: any;
+  lineHeight: any;
+  textCase: any;
+  textDecoration: any;
+}
+
+interface BendConfig {
+  sourceTextNodeId?: string;
+  rawText: string;
+  metrics: CharMetric[];
+  strokes: any[];
+  strokeWeight: number;
+  strokeAlign: "INSIDE" | "OUTSIDE" | "CENTER";
+  strokeCap?: any;
+  strokeJoin?: any;
+  dashPattern: number[];
+  effects: any[];
+  opacity: number;
+  blendMode: BlendMode;
+  options: BendOptions;
+}
+
+interface SelectionInfo {
+  type: "text" | "re-edit";
+  textNode?: TextNode;
+  referenceNode: SceneNode;
+  bentNode?: SceneNode;
+  config?: BendConfig;
+}
+
+// Check if a node is created by this plugin (preview or final bent group)
+function isBentNode(node: BaseNode | null | undefined): boolean {
+  if (!node) return false;
+  if (currentPreviewGroup && node.id === currentPreviewGroup.id) return true;
+  try {
+    if ("getPluginData" in node && typeof (node as any).getPluginData === "function") {
+      if ((node as any).getPluginData("isBent") === "true") return true;
+      if ((node as any).getPluginData("bendConfig")) return true;
+    }
+  } catch {}
+  if ("name" in node && typeof (node as any).name === "string") {
+    const name = (node as any).name;
+    if (name.startsWith("[Preview] Bent:") || name.startsWith("Bent:")) return true;
+  }
+  if (node.parent && isBentNode(node.parent)) return true;
+  return false;
+}
+
+// Helper: Find selected TextNode or enclosing Group/Frame containing text (ignoring bent groups)
 function findTextInSelection(): TextSelectionInfo | null {
   const selection = figma.currentPage.selection;
   if (!selection || selection.length === 0) return null;
 
   for (const node of selection) {
+    if (isBentNode(node)) continue;
     if (node.type === "TEXT") {
       return { textNode: node, referenceNode: node };
     }
     if ("findOne" in node) {
-      const child = (node as ChildrenMixin).findOne((n) => n.type === "TEXT") as TextNode | null;
-      if (child) {
-        return { textNode: child, referenceNode: node as SceneNode };
+      try {
+        const child = (node as ChildrenMixin).findOne((n) => n.type === "TEXT" && !isBentNode(n)) as TextNode | null;
+        if (child) {
+          return { textNode: child, referenceNode: node as SceneNode };
+        }
+      } catch {}
+    }
+  }
+  return null;
+}
+
+// Determine if the user selected an existing bent group or a flat text layer
+function getSelectionInfo(): SelectionInfo | null {
+  const selection = figma.currentPage.selection;
+  if (!selection || selection.length === 0) return null;
+
+  // 1. Check if single selection is an existing bent group or vector with bendConfig
+  if (selection.length === 1) {
+    const node = selection[0];
+    if (currentPreviewGroup && node.id === currentPreviewGroup.id) {
+      return null;
+    }
+
+    let targetNode: SceneNode | null = node;
+    let rawConfig = "";
+    try {
+      if ("getPluginData" in targetNode) {
+        rawConfig = (targetNode as any).getPluginData("bendConfig");
+      }
+    } catch {}
+
+    // Check parent if user clicked a single character inside the bent group
+    if (!rawConfig && targetNode.parent && "getPluginData" in targetNode.parent) {
+      try {
+        rawConfig = (targetNode.parent as any).getPluginData("bendConfig");
+        if (rawConfig) {
+          targetNode = targetNode.parent as SceneNode;
+        }
+      } catch {}
+    }
+
+    if (rawConfig) {
+      try {
+        const config = JSON.parse(rawConfig) as BendConfig;
+        if (config && config.rawText) {
+          return {
+            type: "re-edit",
+            bentNode: targetNode,
+            referenceNode: targetNode,
+            config
+          };
+        }
+      } catch (e) {
+        console.warn("Could not parse bendConfig:", e);
       }
     }
   }
+
+  // 2. Otherwise search for a flat text layer
+  const textMatch = findTextInSelection();
+  if (textMatch) {
+    return {
+      type: "text",
+      textNode: textMatch.textNode,
+      referenceNode: textMatch.referenceNode
+    };
+  }
+
   return null;
 }
 
@@ -78,19 +209,6 @@ async function safeLoadFont(fontName: any): Promise<FontName> {
   }
 }
 
-interface CharMetric {
-  char: string;
-  width: number;
-  height: number;
-  font: FontName;
-  size: number;
-  fills: any;
-  letterSpacing: any;
-  lineHeight: any;
-  textCase: any;
-  textDecoration: any;
-}
-
 // Measure advance widths of each character accurately using Figma layout engine
 // and extract exact individual font and typographic properties per character
 async function measureAndExtractCharacters(targetNode: TextNode, rawText: string): Promise<CharMetric[]> {
@@ -102,122 +220,151 @@ async function measureAndExtractCharacters(targetNode: TextNode, rawText: string
   measureNode.visible = false;
 
   const charMetrics: CharMetric[] = [];
+  // Normalize Windows \r\n and whitespace to single spaces for circular layout
+  const normalizedText = rawText.replace(/\r\n/g, " ").replace(/[\r\n\t]/g, " ");
+  // Use Array.from to correctly support unicode surrogate pairs and multi-byte glyphs
+  const chars = Array.from(normalizedText);
   const textLen = targetNode.characters.length;
 
-  for (let i = 0; i < rawText.length; i++) {
-    const char = rawText[i];
-    const rangeIndex = Math.min(i, Math.max(0, textLen - 1));
+  try {
+    for (let i = 0; i < chars.length; i++) {
+      const char = chars[i];
+      const rangeIndex = Math.min(i, Math.max(0, textLen - 1));
 
-    // Extract font
-    let font: FontName = { family: "Inter", style: "Regular" };
-    try {
-      const rawFont = targetNode.getRangeFontName(rangeIndex, rangeIndex + 1);
-      if (rawFont && typeof rawFont === "object" && (rawFont as any) !== figma.mixed && rawFont.family) {
-        font = rawFont as FontName;
-      } else if (targetNode.fontName && (targetNode.fontName as any) !== figma.mixed && (targetNode.fontName as FontName).family) {
-        font = targetNode.fontName as FontName;
-      }
-    } catch {
-      if (targetNode.fontName && (targetNode.fontName as any) !== figma.mixed && (targetNode.fontName as FontName).family) {
-        font = targetNode.fontName as FontName;
-      }
-    }
-
-    // Extract size
-    let size = 24;
-    try {
-      const rawSize = targetNode.getRangeFontSize(rangeIndex, rangeIndex + 1);
-      if (typeof rawSize === "number" && Number.isFinite(rawSize)) {
-        size = rawSize;
-      } else if (typeof targetNode.fontSize === "number" && Number.isFinite(targetNode.fontSize)) {
-        size = targetNode.fontSize;
-      }
-    } catch {
-      if (typeof targetNode.fontSize === "number" && Number.isFinite(targetNode.fontSize)) size = targetNode.fontSize;
-    }
-
-    // Extract fills
-    let fills: any = [];
-    try {
-      const rawFills = targetNode.getRangeFills(rangeIndex, rangeIndex + 1);
-      if (rawFills && Array.isArray(rawFills)) {
-        fills = rawFills;
-      } else if (targetNode.fills && Array.isArray(targetNode.fills)) {
-        fills = targetNode.fills;
-      }
-    } catch {
-      if (targetNode.fills && Array.isArray(targetNode.fills)) {
-        fills = targetNode.fills;
-      }
-    }
-
-    // Extract letterSpacing
-    let letterSpacing: any = null;
-    try {
-      const rawSpacing = targetNode.getRangeLetterSpacing(rangeIndex, rangeIndex + 1);
-      if (rawSpacing && typeof rawSpacing === "object" && (rawSpacing as any) !== figma.mixed) {
-        letterSpacing = rawSpacing;
-      } else if (targetNode.letterSpacing && typeof targetNode.letterSpacing === "object" && (targetNode.letterSpacing as any) !== figma.mixed) {
-        letterSpacing = targetNode.letterSpacing;
-      }
-    } catch {}
-
-    // Extract lineHeight
-    let lineHeight: any = null;
-    try {
-      const rawLH = targetNode.getRangeLineHeight(rangeIndex, rangeIndex + 1);
-      if (rawLH && typeof rawLH === "object" && (rawLH as any) !== figma.mixed) {
-        lineHeight = rawLH;
-      } else if (targetNode.lineHeight && typeof targetNode.lineHeight === "object" && (targetNode.lineHeight as any) !== figma.mixed) {
-        lineHeight = targetNode.lineHeight;
-      }
-    } catch {}
-
-    // Extract textCase & textDecoration
-    let textCase: any = null;
-    try {
-      const rawCase = targetNode.getRangeTextCase(rangeIndex, rangeIndex + 1);
-      if (rawCase && typeof rawCase === "string" && (rawCase as any) !== figma.mixed) {
-        textCase = rawCase;
-      }
-    } catch {}
-
-    let textDecoration: any = null;
-    try {
-      const rawDec = targetNode.getRangeTextDecoration(rangeIndex, rangeIndex + 1);
-      if (rawDec && typeof rawDec === "string" && (rawDec as any) !== figma.mixed) {
-        textDecoration = rawDec;
-      }
-    } catch {}
-
-    // Safely load the character's font
-    const loadedFont = await safeLoadFont(font);
-    try {
-      measureNode.fontName = loadedFont;
-      measureNode.fontSize = size;
-      if (letterSpacing) {
-        measureNode.letterSpacing = letterSpacing;
-      }
-    } catch (e) {
-      console.warn("Could not set font on measureNode:", e);
-    }
-
-    if (char === " " || char === "\t" || char === "\n" || char === "\r") {
-      let spaceWidth = 6;
+      // Extract font
+      let font: FontName = { family: "Inter", style: "Regular" };
       try {
-        measureNode.characters = "A ";
-        const w1 = measureNode.width;
-        measureNode.characters = "A";
-        const w0 = measureNode.width;
-        spaceWidth = Math.max(3, w1 - w0);
+        const rawFont = targetNode.getRangeFontName(rangeIndex, rangeIndex + 1);
+        if (rawFont && typeof rawFont === "object" && (rawFont as any) !== figma.mixed && rawFont.family) {
+          font = rawFont as FontName;
+        } else if (targetNode.fontName && (targetNode.fontName as any) !== figma.mixed && (targetNode.fontName as FontName).family) {
+          font = targetNode.fontName as FontName;
+        }
       } catch {
-        spaceWidth = size * 0.3;
+        if (targetNode.fontName && (targetNode.fontName as any) !== figma.mixed && (targetNode.fontName as FontName).family) {
+          font = targetNode.fontName as FontName;
+        }
+      }
+
+      // Extract size
+      let size = 24;
+      try {
+        const rawSize = targetNode.getRangeFontSize(rangeIndex, rangeIndex + 1);
+        if (typeof rawSize === "number" && Number.isFinite(rawSize)) {
+          size = rawSize;
+        } else if (typeof targetNode.fontSize === "number" && Number.isFinite(targetNode.fontSize)) {
+          size = targetNode.fontSize;
+        }
+      } catch {
+        if (typeof targetNode.fontSize === "number" && Number.isFinite(targetNode.fontSize)) size = targetNode.fontSize;
+      }
+
+      // Extract fills
+      let fills: any = [];
+      try {
+        const rawFills = targetNode.getRangeFills(rangeIndex, rangeIndex + 1);
+        if (rawFills && Array.isArray(rawFills)) {
+          fills = rawFills;
+        } else if (targetNode.fills && Array.isArray(targetNode.fills)) {
+          fills = targetNode.fills;
+        }
+      } catch {
+        if (targetNode.fills && Array.isArray(targetNode.fills)) {
+          fills = targetNode.fills;
+        }
+      }
+
+      // Extract letterSpacing
+      let letterSpacing: any = null;
+      try {
+        const rawSpacing = targetNode.getRangeLetterSpacing(rangeIndex, rangeIndex + 1);
+        if (rawSpacing && typeof rawSpacing === "object" && (rawSpacing as any) !== figma.mixed) {
+          letterSpacing = rawSpacing;
+        } else if (targetNode.letterSpacing && typeof targetNode.letterSpacing === "object" && (targetNode.letterSpacing as any) !== figma.mixed) {
+          letterSpacing = targetNode.letterSpacing;
+        }
+      } catch {}
+
+      // Extract lineHeight
+      let lineHeight: any = null;
+      try {
+        const rawLH = targetNode.getRangeLineHeight(rangeIndex, rangeIndex + 1);
+        if (rawLH && typeof rawLH === "object" && (rawLH as any) !== figma.mixed) {
+          lineHeight = rawLH;
+        } else if (targetNode.lineHeight && typeof targetNode.lineHeight === "object" && (targetNode.lineHeight as any) !== figma.mixed) {
+          lineHeight = targetNode.lineHeight;
+        }
+      } catch {}
+
+      // Extract textCase & textDecoration
+      let textCase: any = null;
+      try {
+        const rawCase = targetNode.getRangeTextCase(rangeIndex, rangeIndex + 1);
+        if (rawCase && typeof rawCase === "string" && (rawCase as any) !== figma.mixed) {
+          textCase = rawCase;
+        }
+      } catch {}
+
+      let textDecoration: any = null;
+      try {
+        const rawDec = targetNode.getRangeTextDecoration(rangeIndex, rangeIndex + 1);
+        if (rawDec && typeof rawDec === "string" && (rawDec as any) !== figma.mixed) {
+          textDecoration = rawDec;
+        }
+      } catch {}
+
+      // Safely load the character's font
+      const loadedFont = await safeLoadFont(font);
+      try {
+        measureNode.fontName = loadedFont;
+        measureNode.fontSize = size;
+        if (letterSpacing) {
+          measureNode.letterSpacing = letterSpacing;
+        }
+        if (textCase && typeof textCase === "string") {
+          (measureNode as any).textCase = textCase;
+        }
+      } catch (e) {
+        console.warn("Could not set font on measureNode:", e);
+      }
+
+      if (char === " ") {
+        let spaceWidth = 6;
+        try {
+          measureNode.characters = "A ";
+          const w1 = measureNode.width;
+          measureNode.characters = "A";
+          const w0 = measureNode.width;
+          spaceWidth = (w1 > w0) ? (w1 - w0) : (size * 0.28);
+        } catch {
+          spaceWidth = size * 0.28;
+        }
+
+        charMetrics.push({
+          char,
+          width: spaceWidth,
+          height: measureNode.height || size,
+          font: loadedFont,
+          size,
+          fills,
+          letterSpacing,
+          lineHeight,
+          textCase,
+          textDecoration
+        });
+        continue;
+      }
+
+      try {
+        measureNode.characters = char;
+      } catch {
+        measureNode.characters = "?";
       }
 
       charMetrics.push({
         char,
-        width: spaceWidth,
-        height: measureNode.height || size,
+        width: Math.max(1, measureNode.width),
+        height: Math.max(1, measureNode.height || size),
         font: loadedFont,
         size,
         fills,
@@ -226,40 +373,23 @@ async function measureAndExtractCharacters(targetNode: TextNode, rawText: string
         textCase,
         textDecoration
       });
-      continue;
     }
-
+  } finally {
     try {
-      measureNode.characters = char;
-    } catch {
-      measureNode.characters = "?";
-    }
-
-    charMetrics.push({
-      char,
-      width: Math.max(1, measureNode.width),
-      height: Math.max(1, measureNode.height || size),
-      font: loadedFont,
-      size,
-      fills,
-      letterSpacing,
-      lineHeight,
-      textCase,
-      textDecoration
-    });
+      measureNode.remove();
+    } catch {}
   }
-
-  try {
-    measureNode.remove();
-  } catch {}
 
   return charMetrics;
 }
 
 // Send current selection details to UI
 function syncSelectionWithUI() {
-  const match = findTextInSelection();
-  if (!match) {
+  const info = getSelectionInfo();
+  if (!info) {
+    clearPreview();
+    activeReEditNode = null;
+    activeReEditConfig = null;
     lastSelectedNodeId = null;
     lastSelectedTextNodeId = null;
     figma.ui.postMessage({
@@ -270,7 +400,40 @@ function syncSelectionWithUI() {
     return;
   }
 
-  const { textNode, referenceNode } = match;
+  if (info.type === "re-edit" && info.bentNode && info.config) {
+    if (activeReEditNode && activeReEditNode.id !== info.bentNode.id) {
+      clearPreview();
+    }
+    activeReEditNode = info.bentNode;
+    activeReEditConfig = info.config;
+    lastSelectedNodeId = info.bentNode.id;
+    lastSelectedTextNodeId = info.config.sourceTextNodeId || null;
+
+    const cleanLabel = info.bentNode.name.replace(/^\[Preview\]\s*/, "").replace(/^Bent:\s*/, "");
+
+    figma.ui.postMessage({
+      type: "selection-changed",
+      hasSelection: true,
+      isReEdit: true,
+      text: info.config.rawText,
+      previewLabel: `Re-editing: ${cleanLabel}`,
+      fontSize: info.config.metrics && info.config.metrics[0] ? info.config.metrics[0].size : 24,
+      nodeName: `Bent: ${cleanLabel}`,
+      config: info.config.options
+    });
+    return;
+  }
+
+  // Normal text selection
+  if (activeReEditNode) {
+    clearPreview();
+    activeReEditNode = null;
+    activeReEditConfig = null;
+  }
+
+  const { textNode, referenceNode } = info;
+  if (!textNode) return;
+
   lastSelectedNodeId = referenceNode.id;
   lastSelectedTextNodeId = textNode.id;
 
@@ -281,6 +444,7 @@ function syncSelectionWithUI() {
   figma.ui.postMessage({
     type: "selection-changed",
     hasSelection: true,
+    isReEdit: false,
     text: textNode.characters,
     previewLabel: charPreview,
     fontSize: typeof textNode.fontSize === "number" ? textNode.fontSize : 24,
@@ -291,6 +455,7 @@ function syncSelectionWithUI() {
 // Listen to selection changes on the canvas
 figma.on("selectionchange", () => {
   const selection = figma.currentPage.selection;
+  // If the selection is our active temporary preview group, don't trigger selection sync
   if (currentPreviewGroup && selection.length === 1 && selection[0].id === currentPreviewGroup.id) {
     return;
   }
@@ -305,15 +470,10 @@ function clearPreview() {
     } catch (e) {}
   }
   currentPreviewGroup = null;
-}
 
-interface BendOptions {
-  bend: number;
-  tracking: number;
-  alignment: "baseline" | "center" | "top" | "bottom";
-  placement: "beside" | "below" | "inplace";
-  invert: boolean;
-  outputFormat: "text" | "vector";
+  if (activeReEditNode && !activeReEditNode.removed) {
+    activeReEditNode.visible = true;
+  }
 }
 
 async function getNodeSafely(id: string | null): Promise<BaseNode | null> {
@@ -331,7 +491,13 @@ async function getNodeSafely(id: string | null): Promise<BaseNode | null> {
 }
 
 // Construct bent type geometry and return the created GroupNode or SceneNode placed beside the original
-async function generateBentNodes(options: BendOptions, isLivePreview = false): Promise<SceneNode | null> {
+async function generateBentNodes(
+  options: BendOptions,
+  isLivePreview = false,
+  explicitTextNode?: TextNode | null,
+  explicitReferenceNode?: SceneNode | null,
+  snapshotConfig?: BendConfig | null
+): Promise<SceneNode | null> {
   const {
     bend = 50,
     tracking = 0,
@@ -341,59 +507,93 @@ async function generateBentNodes(options: BendOptions, isLivePreview = false): P
     outputFormat = "text"
   } = options;
 
-  let textNode: TextNode | null = null;
-  let referenceNode: SceneNode | null = null;
+  let textNode: TextNode | null = explicitTextNode || null;
+  let referenceNode: SceneNode | null = explicitReferenceNode || null;
+  const isReEditMode = !!(snapshotConfig || (activeReEditNode && activeReEditNode.id === referenceNode?.id));
 
-  // Prefer direct active canvas selection
-  const freshMatch = findTextInSelection();
-  if (freshMatch) {
-    textNode = freshMatch.textNode;
-    referenceNode = freshMatch.referenceNode;
-  } else if (lastSelectedTextNodeId && lastSelectedNodeId) {
-    textNode = (await getNodeSafely(lastSelectedTextNodeId)) as TextNode | null;
-    referenceNode = (await getNodeSafely(lastSelectedNodeId)) as SceneNode | null;
-  }
-
-  if (!textNode || textNode.type !== "TEXT" || textNode.removed || !referenceNode || referenceNode.removed) {
-    figma.notify("Original text layer not found. Please re-select it.", { error: true });
-    return null;
-  }
+  let rawText = "";
+  let metrics: CharMetric[] = [];
+  let strokes: any[] = [];
+  let strokeWeight = 1;
+  let strokeAlign: "INSIDE" | "OUTSIDE" | "CENTER" = "INSIDE";
+  let strokeCap: any = undefined;
+  let strokeJoin: any = undefined;
+  let dashPattern: number[] = [];
+  let effects: any[] = [];
+  let opacity = 1;
+  let blendMode: BlendMode = "PASS_THROUGH";
 
   // Pre-load default fallback font
   await safeLoadFont({ family: "Inter", style: "Regular" });
 
-  // Read common stroke & effect properties from source text layer safely
-  let strokes: any[] = [];
-  try {
-    if (textNode.strokes && Array.isArray(textNode.strokes)) {
-      strokes = JSON.parse(JSON.stringify(textNode.strokes));
+  if (snapshotConfig) {
+    rawText = snapshotConfig.rawText;
+    metrics = snapshotConfig.metrics;
+    strokes = snapshotConfig.strokes || [];
+    strokeWeight = snapshotConfig.strokeWeight || 1;
+    strokeAlign = snapshotConfig.strokeAlign || "INSIDE";
+    strokeCap = snapshotConfig.strokeCap;
+    strokeJoin = snapshotConfig.strokeJoin;
+    dashPattern = snapshotConfig.dashPattern || [];
+    effects = snapshotConfig.effects || [];
+    opacity = typeof snapshotConfig.opacity === "number" ? snapshotConfig.opacity : 1;
+    blendMode = snapshotConfig.blendMode || "PASS_THROUGH";
+
+    if (!referenceNode && activeReEditNode) {
+      referenceNode = activeReEditNode;
     }
-  } catch {}
-
-  const strokeWeight = typeof textNode.strokeWeight === "number" ? textNode.strokeWeight : 1;
-  const strokeAlign = textNode.strokeAlign || "INSIDE";
-  const strokeCap = (textNode.strokeCap as any) !== figma.mixed ? textNode.strokeCap : undefined;
-  const strokeJoin = (textNode.strokeJoin as any) !== figma.mixed ? textNode.strokeJoin : undefined;
-  const dashPattern = Array.isArray(textNode.dashPattern) && textNode.dashPattern.length > 0 ? textNode.dashPattern : [];
-
-  let effects: any[] = [];
-  try {
-    if (textNode.effects && Array.isArray(textNode.effects)) {
-      effects = JSON.parse(JSON.stringify(textNode.effects));
+  } else {
+    if (!textNode || !referenceNode) {
+      const match = findTextInSelection();
+      if (match) {
+        textNode = match.textNode;
+        referenceNode = match.referenceNode;
+      } else if (lastSelectedTextNodeId && lastSelectedNodeId) {
+        const t = await getNodeSafely(lastSelectedTextNodeId);
+        const r = await getNodeSafely(lastSelectedNodeId);
+        if (t && t.type === "TEXT" && !t.removed && !isBentNode(t)) {
+          textNode = t as TextNode;
+        }
+        if (r && !r.removed && !isBentNode(r)) {
+          referenceNode = r as SceneNode;
+        }
+      }
     }
-  } catch {}
 
-  const opacity = typeof textNode.opacity === "number" ? textNode.opacity : 1;
-  const blendMode = textNode.blendMode || "PASS_THROUGH";
+    if (!textNode || textNode.type !== "TEXT" || textNode.removed || !referenceNode || referenceNode.removed) {
+      figma.notify("Original text layer not found. Please re-select it.", { error: true });
+      return null;
+    }
 
-  const rawText = textNode.characters;
-  if (!rawText.trim()) {
-    figma.notify("Text layer is empty.", { error: true });
-    return null;
+    rawText = textNode.characters;
+    if (!rawText.trim()) {
+      figma.notify("Text layer is empty.", { error: true });
+      return null;
+    }
+
+    try {
+      if (textNode.strokes && Array.isArray(textNode.strokes)) {
+        strokes = JSON.parse(JSON.stringify(textNode.strokes));
+      }
+    } catch {}
+
+    strokeWeight = typeof textNode.strokeWeight === "number" ? textNode.strokeWeight : 1;
+    strokeAlign = (textNode.strokeAlign as any) || "INSIDE";
+    strokeCap = (textNode.strokeCap as any) !== figma.mixed ? textNode.strokeCap : undefined;
+    strokeJoin = (textNode.strokeJoin as any) !== figma.mixed ? textNode.strokeJoin : undefined;
+    dashPattern = Array.isArray(textNode.dashPattern) && textNode.dashPattern.length > 0 ? textNode.dashPattern : [];
+
+    try {
+      if (textNode.effects && Array.isArray(textNode.effects)) {
+        effects = JSON.parse(JSON.stringify(textNode.effects));
+      }
+    } catch {}
+
+    opacity = typeof textNode.opacity === "number" ? textNode.opacity : 1;
+    blendMode = textNode.blendMode || "PASS_THROUGH";
+
+    metrics = await measureAndExtractCharacters(textNode, rawText);
   }
-
-  // Measure all characters with exact font properties
-  const metrics = await measureAndExtractCharacters(textNode, rawText);
 
   const totalWidth = metrics.reduce((sum, m) => sum + m.width, 0) + (metrics.length - 1) * tracking;
   if (totalWidth <= 0) return null;
@@ -457,8 +657,8 @@ async function generateBentNodes(options: BendOptions, isLivePreview = false): P
       if (invert) rotation += Math.PI;
     }
 
-    // Skip empty whitespace characters from node creation
-    if (item.char === " " || item.char === "\t" || item.char === "\n" || item.char === "\r") {
+    // Skip whitespace characters from node creation
+    if (item.char === " ") {
       continue;
     }
 
@@ -473,6 +673,10 @@ async function generateBentNodes(options: BendOptions, isLivePreview = false): P
       anchorY = charHeight;
     }
 
+    if (invert) {
+      anchorY = charHeight - anchorY;
+    }
+
     const cosR = Math.cos(rotation);
     const sinR = Math.sin(rotation);
     const tx = targetX - (anchorX * cosR - anchorY * sinR);
@@ -480,18 +684,28 @@ async function generateBentNodes(options: BendOptions, isLivePreview = false): P
 
     // Create TextNode for character
     const charNode = figma.createText();
+    charNode.setPluginData("isBent", "true");
+    charNode.autoRename = false;
+    charNode.name = item.char;
+
     try {
       charNode.fontName = item.font;
-      charNode.fontSize = item.size;
-      charNode.characters = item.char;
-      charNode.autoRename = false;
-      charNode.name = item.char;
     } catch (e) {
-      console.warn("Could not set character properties:", e);
+      console.warn("Could not set character fontName:", e);
+    }
+    try {
+      charNode.fontSize = item.size;
+    } catch (e) {
+      console.warn("Could not set character fontSize:", e);
+    }
+    try {
+      charNode.characters = item.char;
+    } catch (e) {
+      console.warn("Could not set character text:", e);
     }
 
-    // Apply exact font fills from character range
-    if (item.fills && Array.isArray(item.fills) && item.fills.length > 0) {
+    // Apply exact font fills from character range (including empty [] for outline text)
+    if (Array.isArray(item.fills)) {
       try {
         charNode.fills = JSON.parse(JSON.stringify(item.fills));
       } catch {}
@@ -551,57 +765,103 @@ async function generateBentNodes(options: BendOptions, isLivePreview = false): P
 
   // All createdNodes were created in figma.currentPage, so figma.group on currentPage is 100% safe
   const group = figma.group(createdNodes, figma.currentPage);
-  const snippet = rawText.length > 20 ? rawText.slice(0, 18) + "..." : rawText;
-  group.name = isLivePreview ? `[Preview] Bent: ${snippet}` : `Bent: ${snippet}`;
+  group.setPluginData("isBent", "true");
 
-  // Check if referenceNode is inside a Frame that can accept children
-  const refParent = referenceNode.parent;
-  let canAttachToParent = false;
-
-  if (refParent && refParent.type !== "INSTANCE") {
-    if (refParent.type === "FRAME" && refParent.layoutMode !== "NONE") {
-      // Auto-layout frame: creating or moving groups into it can conflict
-      canAttachToParent = false;
-    } else if (refParent !== figma.currentPage) {
-      canAttachToParent = true;
-    }
+  let label = referenceNode?.name || rawText;
+  label = label.replace(/^\[Preview\]\s*/, "").replace(/^Bent:\s*/, "");
+  if (label.length > 24) {
+    label = label.slice(0, 21) + "...";
   }
+  group.name = isLivePreview ? `[Preview] Bent: ${label}` : `Bent: ${label}`;
 
-  if (canAttachToParent && refParent) {
+  // If in re-edit mode, keep referenceNode hidden during live preview
+  if (isReEditMode && activeReEditNode && !activeReEditNode.removed) {
+    activeReEditNode.visible = false;
+  } else if (isLivePreview && referenceNode && !referenceNode.removed) {
     try {
-      (refParent as BaseNode & ChildrenMixin).appendChild(group);
-    } catch (e) {
-      console.warn("Could not append group to parent frame, leaving on currentPage:", e);
+      figma.currentPage.selection = [referenceNode];
+    } catch {}
+  }
+
+  // Positioning
+  if (isReEditMode && referenceNode && !referenceNode.removed) {
+    // In re-edit mode, place directly where the existing bent group was!
+    const targetParent = referenceNode.parent;
+    if (targetParent && targetParent !== figma.currentPage && "appendChild" in targetParent) {
+      try {
+        (targetParent as any).appendChild(group);
+      } catch {}
+    }
+    group.x = referenceNode.x + (referenceNode.width / 2) - (group.width / 2);
+    group.y = referenceNode.y + (referenceNode.height / 2) - (group.height / 2);
+  } else if (referenceNode && !referenceNode.removed) {
+    // Check if referenceNode is inside a Frame that can accept children
+    const refParent = referenceNode.parent;
+    let canAttachToParent = false;
+
+    if (refParent && refParent.type !== "INSTANCE" && refParent.type !== "GROUP") {
+      if (refParent.type === "FRAME" && refParent.layoutMode !== "NONE") {
+        canAttachToParent = false;
+      } else if (refParent !== figma.currentPage && "appendChild" in refParent) {
+        canAttachToParent = true;
+      }
+    }
+
+    if (canAttachToParent && refParent) {
+      try {
+        (refParent as BaseNode & ChildrenMixin).appendChild(group);
+      } catch (e) {
+        console.warn("Could not append group to parent frame, leaving on currentPage:", e);
+      }
+    }
+
+    // Calculate coordinates in the correct parent coordinate space
+    let refX = referenceNode.x;
+    let refY = referenceNode.y;
+    let refW = referenceNode.width;
+    let refH = referenceNode.height;
+
+    if (group.parent === figma.currentPage && referenceNode.parent !== figma.currentPage) {
+      const absBox = referenceNode.absoluteBoundingBox;
+      if (absBox) {
+        refX = absBox.x;
+        refY = absBox.y;
+        refW = absBox.width;
+        refH = absBox.height;
+      }
+    }
+
+    const gap = 36;
+    if (placement === "beside") {
+      group.x = refX + refW + gap;
+      group.y = refY + (refH / 2) - (group.height / 2);
+    } else if (placement === "below") {
+      group.x = refX + (refW / 2) - (group.width / 2);
+      group.y = refY + refH + gap;
+    } else {
+      group.x = refX + (refW / 2) - (group.width / 2);
+      group.y = refY + (refH / 2) - (group.height / 2);
     }
   }
 
-  // Calculate coordinates in the correct parent coordinate space
-  let refX = referenceNode.x;
-  let refY = referenceNode.y;
-  let refW = referenceNode.width;
-  let refH = referenceNode.height;
+  const configToSave: BendConfig = {
+    sourceTextNodeId: snapshotConfig?.sourceTextNodeId || textNode?.id,
+    rawText,
+    metrics,
+    strokes,
+    strokeWeight,
+    strokeAlign: strokeAlign as any,
+    strokeCap,
+    strokeJoin,
+    dashPattern,
+    effects,
+    opacity,
+    blendMode,
+    options
+  };
 
-  // If group ended up on currentPage while referenceNode is in a nested frame
-  if (group.parent === figma.currentPage && referenceNode.parent !== figma.currentPage) {
-    const absBox = referenceNode.absoluteBoundingBox;
-    if (absBox) {
-      refX = absBox.x;
-      refY = absBox.y;
-      refW = absBox.width;
-      refH = absBox.height;
-    }
-  }
-
-  const gap = 36;
-  if (placement === "beside") {
-    group.x = refX + refW + gap;
-    group.y = refY + (refH / 2) - (group.height / 2);
-  } else if (placement === "below") {
-    group.x = refX + (refW / 2) - (group.width / 2);
-    group.y = refY + refH + gap;
-  } else {
-    group.x = refX + (refW / 2) - (group.width / 2);
-    group.y = refY + (refH / 2) - (group.height / 2);
+  if (!isLivePreview) {
+    group.setPluginData("bendConfig", JSON.stringify(configToSave));
   }
 
   if (isLivePreview) {
@@ -612,7 +872,9 @@ async function generateBentNodes(options: BendOptions, isLivePreview = false): P
   if (outputFormat === "vector") {
     try {
       const flattened = figma.flatten([group], group.parent || figma.currentPage);
-      flattened.name = `Bent: ${snippet} (Vector)`;
+      flattened.name = `Bent: ${label} (Vector)`;
+      flattened.setPluginData("isBent", "true");
+      flattened.setPluginData("bendConfig", JSON.stringify(configToSave));
       return flattened;
     } catch (e) {
       console.warn("Flatten to vector failed, keeping text group", e);
@@ -632,14 +894,50 @@ figma.ui.onmessage = async (msg) => {
     }
 
     case "preview-bend": {
-      const match = findTextInSelection();
-      if (!match) return;
+      const sessionId = ++currentPreviewSession;
+
+      let textNode: TextNode | null = null;
+      let referenceNode: SceneNode | null = null;
+      let snapshot: BendConfig | null = null;
+
+      if (activeReEditNode && activeReEditConfig) {
+        referenceNode = activeReEditNode;
+        snapshot = activeReEditConfig;
+      } else {
+        const match = findTextInSelection();
+        if (match) {
+          textNode = match.textNode;
+          referenceNode = match.referenceNode;
+        } else if (lastSelectedTextNodeId && lastSelectedNodeId) {
+          const t = await getNodeSafely(lastSelectedTextNodeId);
+          const r = await getNodeSafely(lastSelectedNodeId);
+          if (t && t.type === "TEXT" && !t.removed && !isBentNode(t)) {
+            textNode = t as TextNode;
+          }
+          if (r && !r.removed && !isBentNode(r)) {
+            referenceNode = r as SceneNode;
+          }
+        }
+      }
+
+      if (!snapshot && (!textNode || !referenceNode)) return;
 
       clearPreview();
-      match.referenceNode.visible = true;
+      if (snapshot && activeReEditNode && !activeReEditNode.removed) {
+        activeReEditNode.visible = false;
+      } else if (referenceNode) {
+        referenceNode.visible = true;
+      }
 
       try {
-        currentPreviewGroup = (await generateBentNodes(msg.options, true)) as GroupNode | null;
+        const preview = (await generateBentNodes(msg.options, true, textNode, referenceNode, snapshot)) as GroupNode | null;
+        if (sessionId !== currentPreviewSession) {
+          if (preview && !preview.removed) {
+            try { preview.remove(); } catch {}
+          }
+          return;
+        }
+        currentPreviewGroup = preview;
       } catch (e) {
         console.warn("Preview error:", e);
       }
@@ -652,31 +950,112 @@ figma.ui.onmessage = async (msg) => {
     }
 
     case "apply-bend": {
-      clearPreview();
-
-      const match = findTextInSelection();
-      if (!match) {
-        figma.notify("Please select a text layer to apply.", { error: true });
-        return;
-      }
-
       try {
-        const finalGroup = await generateBentNodes(msg.options, false);
+        let finalGroup: SceneNode | null = null;
+        const isReEdit = !!(activeReEditNode && activeReEditConfig);
+        const oldTarget = activeReEditNode;
+
+        if (currentPreviewGroup && !currentPreviewGroup.removed) {
+          const targetGroup = currentPreviewGroup;
+          currentPreviewGroup = null;
+
+          const cleanName = targetGroup.name.replace(/^\[Preview\]\s*/, "");
+          const savedConfig = isReEdit && activeReEditConfig ? activeReEditConfig : null;
+
+          if (savedConfig) {
+            savedConfig.options = msg.options;
+            targetGroup.setPluginData("bendConfig", JSON.stringify(savedConfig));
+          }
+
+          if (msg.options && msg.options.outputFormat === "vector") {
+            try {
+              const parent = targetGroup.parent || figma.currentPage;
+              const flattened = figma.flatten([targetGroup], parent);
+              flattened.name = `${cleanName} (Vector)`;
+              flattened.setPluginData("isBent", "true");
+              if (savedConfig) {
+                flattened.setPluginData("bendConfig", JSON.stringify(savedConfig));
+              }
+              finalGroup = flattened;
+            } catch (e) {
+              targetGroup.name = cleanName;
+              targetGroup.setPluginData("isBent", "true");
+              finalGroup = targetGroup;
+            }
+          } else {
+            targetGroup.name = cleanName;
+            targetGroup.setPluginData("isBent", "true");
+            finalGroup = targetGroup;
+          }
+        } else {
+          clearPreview();
+
+          let textNode: TextNode | null = null;
+          let referenceNode: SceneNode | null = null;
+          let snapshot: BendConfig | null = null;
+
+          if (isReEdit && activeReEditConfig) {
+            referenceNode = oldTarget;
+            snapshot = activeReEditConfig;
+          } else {
+            const match = findTextInSelection();
+            if (match) {
+              textNode = match.textNode;
+              referenceNode = match.referenceNode;
+            } else if (lastSelectedTextNodeId && lastSelectedNodeId) {
+              const t = await getNodeSafely(lastSelectedTextNodeId);
+              const r = await getNodeSafely(lastSelectedNodeId);
+              if (t && t.type === "TEXT" && !t.removed && !isBentNode(t)) {
+                textNode = t as TextNode;
+              }
+              if (r && !r.removed && !isBentNode(r)) {
+                referenceNode = r as SceneNode;
+              }
+            }
+          }
+
+          if (!snapshot && (!textNode || !referenceNode)) {
+            figma.notify("Please select a text layer to apply.", { error: true });
+            return;
+          }
+
+          finalGroup = await generateBentNodes(msg.options, false, textNode, referenceNode, snapshot);
+        }
+
         if (finalGroup) {
-          match.referenceNode.visible = true;
+          // If in re-edit mode, replace oldTarget in place
+          if (isReEdit && oldTarget && !oldTarget.removed) {
+            const parent = oldTarget.parent;
+            if (parent && "insertChild" in parent && typeof (parent as any).insertChild === "function") {
+              try {
+                const idx = parent.children.indexOf(oldTarget);
+                if (idx !== -1) {
+                  (parent as any).insertChild(idx, finalGroup);
+                }
+              } catch {}
+            }
+            try {
+              oldTarget.remove();
+            } catch {}
+          }
+
           figma.currentPage.selection = [finalGroup];
-          figma.notify("New curved text group created beside your text!");
+          figma.notify(isReEdit ? "Bent text updated successfully!" : "Bent text applied successfully.");
+
+          if (isReEdit) {
+            activeReEditNode = finalGroup;
+          }
 
           if (msg.closeOnApply) {
             figma.closePlugin();
           }
         } else {
-          figma.notify("Could not create curved text. Please check text selection.", { error: true });
+          figma.notify("Could not apply bent text.", { error: true });
         }
       } catch (err: any) {
-        console.error("Failed to bend text:", err);
+        console.error("Failed to apply bent text:", err);
         const errMsg = err && err.message ? err.message : String(err);
-        figma.notify("Error bending text: " + errMsg, { error: true });
+        figma.notify("Error applying bent text: " + errMsg, { error: true });
       }
       break;
     }
@@ -688,3 +1067,22 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 };
+
+// Always clean up preview if user closes plugin via the Figma UI close button
+figma.on("close", () => {
+  clearPreview();
+});
+
+// Update UI and preview when the selected text content is edited in place
+figma.on("documentchange", (event) => {
+  if (!lastSelectedTextNodeId && !activeReEditNode) return;
+  for (const change of event.documentChanges) {
+    if (
+      change.type === "PROPERTY_CHANGE" &&
+      (change.id === lastSelectedTextNodeId || (activeReEditNode && change.id === activeReEditNode.id))
+    ) {
+      syncSelectionWithUI();
+      break;
+    }
+  }
+});

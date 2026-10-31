@@ -37,7 +37,7 @@
       font-size: 11px;
       line-height: 1.4;
       padding: 12px;
-      height: 100vh;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
       overflow-x: hidden;
@@ -52,6 +52,7 @@
       margin-bottom: 10px;
       padding-bottom: 8px;
       border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
     }
 
     .brand-wrap {
@@ -61,16 +62,22 @@
     }
 
     .brand-icon {
-      width: 24px;
-      height: 24px;
-      background: var(--brand);
-      border-radius: var(--radius-sm);
+      width: 28px;
+      height: 28px;
+      background: transparent;
+      border-radius: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: var(--text-on-brand);
-      font-weight: 700;
-      font-size: 13px;
+      flex-shrink: 0;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
+    .brand-icon svg {
+      width: 100%;
+      height: 100%;
+      display: block;
     }
 
     .brand-title {
@@ -122,6 +129,7 @@
       position: relative;
       margin-bottom: 10px;
       overflow: hidden;
+      flex-shrink: 0;
     }
 
     .preview-header {
@@ -142,6 +150,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      flex-shrink: 0;
     }
 
     svg#preview-canvas {
@@ -292,20 +301,6 @@
       box-shadow: 0 1px 2px rgba(0,0,0,0.06);
     }
 
-    /* Info Banner */
-    .info-banner {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      padding: 6px 8px;
-      font-size: 10px;
-      color: var(--text-secondary);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 10px;
-    }
-
     /* Checkbox & Options Rows */
     .options-grid {
       display: grid;
@@ -395,6 +390,14 @@
       background: var(--brand-hover);
     }
 
+    .btn-primary.btn-update {
+      background: #059669;
+    }
+
+    .btn-primary.btn-update:hover {
+      background: #047857;
+    }
+
     .btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -406,7 +409,43 @@
   <!-- Header -->
   <div class="header">
     <div class="brand-wrap">
-      <div class="brand-icon">⌒</div>
+      <div class="brand-icon">
+        <svg width="28" height="28" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <g clip-path="url(#plugin-logo-clip)">
+            <path d="M400 0H112C50.1441 0 0 50.1441 0 112V400C0 461.856 50.1441 512 112 512H400C461.856 512 512 461.856 512 400V112C512 50.1441 461.856 0 400 0Z" fill="url(#plugin-logo-bg)"/>
+            <g filter="url(#plugin-logo-glow)">
+              <path d="M426.324 177.954C362.403 334.104 172.266 360.785 67.8361 228.26" stroke-width="32" stroke-linecap="round" stroke="url(#plugin-logo-bend)"/>
+            </g>
+            <path opacity="0.95" d="M427.505 175.582C367.726 325.263 172.367 361.507 67.5323 226.095" stroke-width="5" stroke-linecap="round" stroke="white"/>
+            <path opacity="0.95" d="M426.323 177.954C423.112 185.801 419.581 193.32 415.759 200.509M415.759 200.509C343.511 336.384 167.018 354.127 67.836 228.26M415.759 200.509C420.102 192.59 424.032 184.278 427.505 175.582M415.759 200.509C345.333 328.895 166.277 353.641 67.5322 226.096" stroke-width="5" stroke-linecap="round" stroke="white"/>
+          </g>
+          <defs>
+            <filter id="plugin-logo-glow" x="-48.165" y="61.9492" width="590.493" height="367.329" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+              <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+              <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+              <feOffset/>
+              <feGaussianBlur stdDeviation="50"/>
+              <feComposite in2="hardAlpha" operator="out"/>
+              <feColorMatrix type="matrix" values="0 0 0 0 0.745098 0 0 0 0 0.94902 0 0 0 0 0.392157 0 0 0 0.76 0"/>
+              <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_257_1683"/>
+              <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_257_1683" result="shape"/>
+            </filter>
+            <linearGradient id="plugin-logo-bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#09090B"/>
+              <stop offset="0.5" stop-color="#141419"/>
+              <stop offset="1" stop-color="#050507"/>
+            </linearGradient>
+            <linearGradient id="plugin-logo-bend" x1="441.515" y1="286.207" x2="353.756" y2="96.2012" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#BEF264"/>
+              <stop offset="0.5" stop-color="#84CC16"/>
+              <stop offset="1" stop-color="#4D7C0F"/>
+            </linearGradient>
+            <clipPath id="plugin-logo-clip">
+              <rect width="512" height="512" fill="white"/>
+            </clipPath>
+          </defs>
+        </svg>
+      </div>
       <div>
         <div class="brand-title">Bend the Text</div>
         <div class="brand-subtitle">Curve your typography</div>
@@ -420,7 +459,6 @@
 
   <!-- Empty state alert when no text layer is selected -->
   <div id="empty-alert" class="empty-state">
-    <span>⚠️</span>
     <span>Select a <strong>Text Layer</strong> on your canvas to start bending.</span>
   </div>
 
@@ -499,12 +537,6 @@
     </div>
   </div>
 
-  <!-- Info notice explaining font inheritance -->
-  <div class="info-banner">
-    <span>💡</span>
-    <span>Creates a new group beside your text, perfectly preserving all font, fill, stroke, and effect properties.</span>
-  </div>
-
   <!-- Output Format & Invert Toggles -->
   <div class="options-grid">
     <label class="toggle-row">
@@ -574,24 +606,20 @@
 
       const cx = 160;
       const cy = 60;
-      const baseFontSize = 13;
-      const charWidthEst = 8 + trackingValue * 0.4;
-      const totalWidth = textToRender.length * charWidthEst;
-
-      // Update guide curve
-      if (Math.abs(b) < 0.005) {
-        svgCurveGuide.setAttribute("display", "none");
-      } else {
-        svgCurveGuide.removeAttribute("display");
-        const guideRadius = Math.max(25, Math.min(100, totalWidth / (Math.abs(b) * 2 * Math.PI)));
-        const guideCenterY = b > 0 ? cy + guideRadius : cy - guideRadius;
-        svgCurveGuide.setAttribute("cx", cx);
-        svgCurveGuide.setAttribute("cy", guideCenterY);
-        svgCurveGuide.setAttribute("r", guideRadius);
+      let baseFontSize = 13;
+      let charWidthEst = 8 + trackingValue * 0.4;
+      const maxTextWidth = 260;
+      let totalWidth = textToRender.length * charWidthEst;
+      if (totalWidth > maxTextWidth) {
+        const scale = maxTextWidth / totalWidth;
+        baseFontSize = Math.max(9, Math.round(baseFontSize * scale));
+        charWidthEst = charWidthEst * scale;
+        totalWidth = textToRender.length * charWidthEst;
       }
 
       // Flat text rendering
       if (Math.abs(b) < 0.005) {
+        svgCurveGuide.setAttribute("display", "none");
         const startX = cx - totalWidth / 2;
         for (let i = 0; i < textToRender.length; i++) {
           const char = textToRender[i];
@@ -599,8 +627,8 @@
           const x = startX + i * charWidthEst + charWidthEst / 2;
           const y = cy + 4;
           const textEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
-          textEl.setAttribute("x", x);
-          textEl.setAttribute("y", y);
+          textEl.setAttribute("x", x.toFixed(1));
+          textEl.setAttribute("y", y.toFixed(1));
           textEl.setAttribute("text-anchor", "middle");
           textEl.setAttribute("font-size", baseFontSize);
           textEl.setAttribute("font-weight", "600");
@@ -613,8 +641,23 @@
       // Curved text rendering
       const maxAngle = 2 * Math.PI;
       const theta = b * maxAngle;
-      const radius = Math.max(30, Math.min(110, totalWidth / Math.abs(theta)));
-      const circleCenterY = b > 0 ? cy + radius : cy - radius;
+      const absTheta = Math.abs(theta);
+      const rawRadius = totalWidth / absTheta;
+
+      // Limit radius so the arc fits comfortably inside the 320x120 SVG box
+      let maxRadius = 130;
+      if (absTheta >= Math.PI) {
+        const circFactor = 1 + (absTheta - Math.PI) / Math.PI;
+        maxRadius = Math.min(maxRadius, 76 / circFactor);
+      } else {
+        const hFactor = Math.max(0.08, 1 - Math.cos(absTheta / 2));
+        maxRadius = Math.min(maxRadius, 72 / hFactor);
+      }
+      const radius = Math.max(26, Math.min(rawRadius, maxRadius));
+
+      let minRelY = Infinity;
+      let maxRelY = -Infinity;
+      const charData = [];
 
       for (let i = 0; i < textToRender.length; i++) {
         const char = textToRender[i];
@@ -622,54 +665,98 @@
         let charAngle = dist / radius;
         if (invertValue) charAngle = -charAngle;
 
-        let charX, charY, rotation;
+        let relX, relY, rot;
         if (b > 0) {
-          charX = cx + radius * Math.sin(charAngle);
-          charY = circleCenterY - radius * Math.cos(charAngle);
-          rotation = (charAngle * 180) / Math.PI;
-          if (invertValue) rotation += 180;
+          relX = radius * Math.sin(charAngle);
+          relY = -radius * Math.cos(charAngle);
+          rot = (charAngle * 180) / Math.PI;
+          if (invertValue) rot += 180;
         } else {
-          charX = cx + radius * Math.sin(charAngle);
-          charY = circleCenterY + radius * Math.cos(charAngle);
-          rotation = (-charAngle * 180) / Math.PI;
-          if (invertValue) rotation += 180;
+          relX = radius * Math.sin(charAngle);
+          relY = radius * Math.cos(charAngle);
+          rot = (-charAngle * 180) / Math.PI;
+          if (invertValue) rot += 180;
         }
 
-        if (char === " ") continue;
+        if (char !== " ") {
+          if (relY < minRelY) minRelY = relY;
+          if (relY > maxRelY) maxRelY = relY;
+        }
+
+        charData.push({ char, relX, relY, rot });
+      }
+
+      if (!Number.isFinite(minRelY) || !Number.isFinite(maxRelY)) {
+        minRelY = -radius;
+        maxRelY = radius;
+      }
+
+      // Center the curve vertically at cy = 60
+      const midRelY = (minRelY + maxRelY) / 2;
+      const circleCenterX = cx;
+      const circleCenterY = cy - midRelY;
+
+      // Update guide circle concentric with the centered curve
+      svgCurveGuide.removeAttribute("display");
+      svgCurveGuide.setAttribute("cx", circleCenterX);
+      svgCurveGuide.setAttribute("cy", circleCenterY.toFixed(1));
+      svgCurveGuide.setAttribute("r", radius.toFixed(1));
+
+      for (const item of charData) {
+        if (item.char === " ") continue;
+        const charX = circleCenterX + item.relX;
+        const charY = circleCenterY + item.relY;
+
+        let glyphY = 4;
+        if (alignmentValue === "center") {
+          glyphY = baseFontSize * 0.35;
+        } else if (alignmentValue === "top") {
+          glyphY = baseFontSize * 0.75;
+        } else if (alignmentValue === "bottom") {
+          glyphY = -baseFontSize * 0.15;
+        }
 
         const textEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
         textEl.setAttribute("x", 0);
-        textEl.setAttribute("y", 4);
+        textEl.setAttribute("y", glyphY.toFixed(1));
         textEl.setAttribute("text-anchor", "middle");
         textEl.setAttribute("font-size", baseFontSize);
         textEl.setAttribute("font-weight", "600");
-        textEl.setAttribute("transform", `translate(${charX.toFixed(1)}, ${charY.toFixed(1)}) rotate(${rotation.toFixed(1)})`);
-        textEl.textContent = char;
+        textEl.setAttribute("transform", `translate(${charX.toFixed(1)}, ${charY.toFixed(1)}) rotate(${item.rot.toFixed(1)})`);
+        textEl.textContent = item.char;
         previewGlyphs.appendChild(textEl);
       }
     }
 
-    // Dispatch parameters to backend
+    // Dispatch parameters to backend with requestAnimationFrame debouncing
+    let previewRafId = null;
     function notifyCanvasPreview() {
       if (!hasValidSelection || !livePreviewValue) return;
-      parent.postMessage({
-        pluginMessage: {
-          type: "preview-bend",
-          options: {
-            bend: bendValue,
-            tracking: trackingValue,
-            placement: placementValue,
-            alignment: alignmentValue,
-            invert: invertValue,
-            outputFormat: vectorOutputValue ? "vector" : "text"
+      if (previewRafId) {
+        cancelAnimationFrame(previewRafId);
+      }
+      previewRafId = requestAnimationFrame(() => {
+        previewRafId = null;
+        parent.postMessage({
+          pluginMessage: {
+            type: "preview-bend",
+            options: {
+              bend: bendValue,
+              tracking: trackingValue,
+              placement: placementValue,
+              alignment: alignmentValue,
+              invert: invertValue,
+              outputFormat: vectorOutputValue ? "vector" : "text"
+            }
           }
-        }
-      }, "*");
+        }, "*");
+      });
     }
 
     // UI Updates
     function updateBend(val) {
-      bendValue = parseInt(val, 10);
+      const parsed = parseInt(val, 10);
+      bendValue = Number.isFinite(parsed) ? Math.max(-100, Math.min(100, parsed)) : 0;
       bendSlider.value = bendValue;
       bendNum.value = bendValue;
       bendBadge.textContent = `${bendValue}%`;
@@ -687,7 +774,8 @@
     }
 
     function updateTracking(val) {
-      trackingValue = parseInt(val, 10);
+      const parsed = parseInt(val, 10);
+      trackingValue = Number.isFinite(parsed) ? Math.max(-15, Math.min(35, parsed)) : 0;
       trackingSlider.value = trackingValue;
       trackingNum.value = trackingValue;
       trackingBadge.textContent = `${trackingValue}px`;
@@ -727,6 +815,7 @@
       document.querySelectorAll("#align-segmented .segment-opt").forEach(el => el.classList.remove("active"));
       opt.classList.add("active");
       alignmentValue = opt.getAttribute("data-align");
+      renderPreview();
       notifyCanvasPreview();
     });
 
@@ -753,10 +842,33 @@
 
     // Reset Button
     resetBtn.addEventListener("click", () => {
-      updateBend(0);
-      updateTracking(0);
+      bendValue = 0;
+      bendSlider.value = 0;
+      bendNum.value = 0;
+      bendBadge.textContent = "0%";
+
+      trackingValue = 0;
+      trackingSlider.value = 0;
+      trackingNum.value = 0;
+      trackingBadge.textContent = "0px";
+
+      alignmentValue = "baseline";
+      document.querySelectorAll("#align-segmented .segment-opt").forEach(el => {
+        el.classList.toggle("active", el.getAttribute("data-align") === "baseline");
+      });
+
+      placementValue = "beside";
+      document.querySelectorAll("#placement-segmented .segment-opt").forEach(el => {
+        el.classList.toggle("active", el.getAttribute("data-placement") === "beside");
+      });
+
       invertCheck.checked = false;
       invertValue = false;
+
+      document.querySelectorAll(".preset-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.getAttribute("data-bend") === "0");
+      });
+
       renderPreview();
       notifyCanvasPreview();
     });
@@ -790,10 +902,56 @@
         if (hasValidSelection) {
           currentText = msg.text;
           statusDot.classList.remove("no-sel");
-          statusText.textContent = msg.nodeName || msg.previewLabel;
+          statusText.textContent = msg.previewLabel || msg.nodeName;
           statusText.title = msg.text;
           emptyAlert.style.display = "none";
           applyBtn.disabled = false;
+
+          if (msg.isReEdit) {
+            applyBtn.textContent = "Update Bend";
+            applyBtn.classList.add("btn-update");
+            if (msg.config) {
+              if (typeof msg.config.bend === "number") {
+                bendValue = msg.config.bend;
+                bendSlider.value = bendValue;
+                bendNum.value = bendValue;
+                bendBadge.textContent = `${bendValue}%`;
+                document.querySelectorAll(".preset-btn").forEach(btn => {
+                  btn.classList.toggle("active", parseInt(btn.getAttribute("data-bend"), 10) === bendValue);
+                });
+              }
+              if (typeof msg.config.tracking === "number") {
+                trackingValue = msg.config.tracking;
+                trackingSlider.value = trackingValue;
+                trackingNum.value = trackingValue;
+                trackingBadge.textContent = `${trackingValue}px`;
+              }
+              if (msg.config.placement) {
+                placementValue = msg.config.placement;
+                document.querySelectorAll("#placement-segmented .segment-opt").forEach(el => {
+                  el.classList.toggle("active", el.getAttribute("data-placement") === placementValue);
+                });
+              }
+              if (msg.config.alignment) {
+                alignmentValue = msg.config.alignment;
+                document.querySelectorAll("#align-segmented .segment-opt").forEach(el => {
+                  el.classList.toggle("active", el.getAttribute("data-align") === alignmentValue);
+                });
+              }
+              if (typeof msg.config.invert === "boolean") {
+                invertValue = msg.config.invert;
+                invertCheck.checked = invertValue;
+              }
+              if (msg.config.outputFormat) {
+                vectorOutputValue = msg.config.outputFormat === "vector";
+                vectorCheck.checked = vectorOutputValue;
+              }
+            }
+          } else {
+            applyBtn.textContent = "Apply Bend";
+            applyBtn.classList.remove("btn-update");
+          }
+
           renderPreview();
           notifyCanvasPreview();
         } else {
@@ -801,6 +959,8 @@
           statusText.textContent = "No text selected";
           emptyAlert.style.display = "flex";
           applyBtn.disabled = true;
+          applyBtn.textContent = "Apply Bend";
+          applyBtn.classList.remove("btn-update");
           renderPreview();
         }
       }
